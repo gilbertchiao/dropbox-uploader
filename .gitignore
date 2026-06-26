@@ -1,0 +1,10 @@
+# 機密
+secrets.env
+
+# 編譯產物
+/dropbox-uploader
+
+# Working/Temporary directories
+work/
+temp/
+tmp/
