@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sort"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -134,6 +135,164 @@ func TestUpload_NonASCIIPath(t *testing.T) {
 	for _, r := range gotArg {
 		require.LessOrEqual(t, r, rune(0x7F), "header 應只含 ASCII 字元")
 	}
+}
+
+func TestUpload_Session(t *testing.T) {
+	chunks := map[uint64][]byte{}
+	var commitPath string
+	startCount := 0
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/oauth2/token", tokenHandler(t))
+	mux.HandleFunc("/start", func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		chunks[0] = b
+		startCount++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"session_id":"sess1"}`))
+	})
+	mux.HandleFunc("/append", func(w http.ResponseWriter, r *http.Request) {
+		var a struct {
+			Cursor struct {
+				SessionID string `json:"session_id"`
+				Offset    uint64 `json:"offset"`
+			} `json:"cursor"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(r.Header.Get("Dropbox-API-Arg")), &a))
+		require.Equal(t, "sess1", a.Cursor.SessionID)
+		b, _ := io.ReadAll(r.Body)
+		chunks[a.Cursor.Offset] = b
+		w.WriteHeader(http.StatusOK)
+	})
+	mux.HandleFunc("/finish", func(w http.ResponseWriter, r *http.Request) {
+		var a struct {
+			Cursor struct {
+				Offset uint64 `json:"offset"`
+			} `json:"cursor"`
+			Commit struct {
+				Path string `json:"path"`
+				Mode string `json:"mode"`
+			} `json:"commit"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(r.Header.Get("Dropbox-API-Arg")), &a))
+		b, _ := io.ReadAll(r.Body)
+		if len(b) > 0 {
+			chunks[a.Cursor.Offset] = b
+		}
+		commitPath = a.Commit.Path
+		require.Equal(t, "overwrite", a.Commit.Mode)
+		require.Equal(t, uint64(15), a.Cursor.Offset) // finish offset 應等於總長度
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"name":"big.log"}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	c := New("appkey", "appsecret", "reftok",
+		WithEndpoints(srv.URL+"/oauth2/token", srv.URL+"/upload",
+			srv.URL+"/start", srv.URL+"/append", srv.URL+"/finish"),
+		WithLimits(10, 4)) // simpleLimit=10 bytes, chunk=4 bytes → 觸發 session
+
+	content := []byte("0123456789ABCDE") // 15 bytes > 10
+	dir := t.TempDir()
+	fp := filepath.Join(dir, "big.log")
+	require.NoError(t, os.WriteFile(fp, content, 0o644))
+
+	require.NoError(t, c.Upload(context.Background(), fp, "/logs/big.log"))
+
+	require.Equal(t, 1, startCount, "應只開一次 session")
+	require.Equal(t, "/logs/big.log", commitPath)
+
+	// 依 offset 重組，確認內容完整且順序正確
+	offsets := make([]uint64, 0, len(chunks))
+	for k := range chunks {
+		offsets = append(offsets, k)
+	}
+	sort.Slice(offsets, func(i, j int) bool { return offsets[i] < offsets[j] })
+	var assembled []byte
+	for _, o := range offsets {
+		assembled = append(assembled, chunks[o]...)
+	}
+	require.Equal(t, content, assembled)
+}
+
+func TestUpload_SessionExactMultiple(t *testing.T) {
+	// 檔案大小剛好為 chunk 的整數倍，驗證邊界不會多開 session 或漏段
+	chunks := map[uint64][]byte{}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/oauth2/token", tokenHandler(t))
+	mux.HandleFunc("/start", func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		chunks[0] = b
+		_, _ = w.Write([]byte(`{"session_id":"sess1"}`))
+	})
+	mux.HandleFunc("/append", func(w http.ResponseWriter, r *http.Request) {
+		var a struct {
+			Cursor struct {
+				Offset uint64 `json:"offset"`
+			} `json:"cursor"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(r.Header.Get("Dropbox-API-Arg")), &a))
+		b, _ := io.ReadAll(r.Body)
+		chunks[a.Cursor.Offset] = b
+		w.WriteHeader(http.StatusOK)
+	})
+	mux.HandleFunc("/finish", func(w http.ResponseWriter, r *http.Request) {
+		var a struct {
+			Cursor struct {
+				Offset uint64 `json:"offset"`
+			} `json:"cursor"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(r.Header.Get("Dropbox-API-Arg")), &a))
+		require.Equal(t, uint64(12), a.Cursor.Offset)
+		_, _ = w.Write([]byte(`{"name":"big.log"}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	c := New("appkey", "appsecret", "reftok",
+		WithEndpoints(srv.URL+"/oauth2/token", srv.URL+"/upload",
+			srv.URL+"/start", srv.URL+"/append", srv.URL+"/finish"),
+		WithLimits(10, 4))
+
+	content := []byte("0123456789AB") // 12 bytes = 3 * 4
+	dir := t.TempDir()
+	fp := filepath.Join(dir, "big.log")
+	require.NoError(t, os.WriteFile(fp, content, 0o644))
+
+	require.NoError(t, c.Upload(context.Background(), fp, "/logs/big.log"))
+
+	offsets := make([]uint64, 0, len(chunks))
+	for k := range chunks {
+		offsets = append(offsets, k)
+	}
+	sort.Slice(offsets, func(i, j int) bool { return offsets[i] < offsets[j] })
+	var assembled []byte
+	for _, o := range offsets {
+		assembled = append(assembled, chunks[o]...)
+	}
+	require.Equal(t, content, assembled)
+}
+
+func TestUpload_SessionInvalidChunkSize(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/oauth2/token", tokenHandler(t))
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	c := New("appkey", "appsecret", "reftok",
+		WithEndpoints(srv.URL+"/oauth2/token", srv.URL+"/upload",
+			srv.URL+"/start", srv.URL+"/append", srv.URL+"/finish"),
+		WithLimits(10, 0)) // chunkSize=0 → 應回明確錯誤而非卡死
+
+	content := []byte("0123456789ABC") // 13 bytes > 10 → 走 session
+	dir := t.TempDir()
+	fp := filepath.Join(dir, "big.log")
+	require.NoError(t, os.WriteFile(fp, content, 0o644))
+
+	err := c.Upload(context.Background(), fp, "/logs/big.log")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "分段大小無效")
 }
 
 func TestAsciiSafe(t *testing.T) {
