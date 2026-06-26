@@ -3,6 +3,7 @@
 package dropbox
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -243,7 +244,154 @@ func checkUploadResponse(resp *http.Response) error {
 	return nil
 }
 
-// sessionUpload 在 Task 3 實作大檔分段上傳。
+type sessionStartResp struct {
+	SessionID string `json:"session_id"`
+}
+
+type uploadCursor struct {
+	SessionID string `json:"session_id"`
+	Offset    uint64 `json:"offset"`
+}
+
+type appendArg struct {
+	Cursor uploadCursor `json:"cursor"`
+	Close  bool         `json:"close"`
+}
+
+type finishArg struct {
+	Cursor uploadCursor `json:"cursor"`
+	Commit commitInfo   `json:"commit"`
+}
+
+// sessionUpload 以分段 session 上傳大檔：
+// start（第一段）→ append（中段）→ finish（空段 + commit）。
 func (c *Client) sessionUpload(ctx context.Context, token, localPath, remotePath string, size int64) error {
-	return errors.New("session upload 尚未實作")
+	f, err := os.Open(localPath)
+	if err != nil {
+		return fmt.Errorf("開啟檔案失敗: %w", err)
+	}
+	defer f.Close()
+
+	buf := make([]byte, c.chunkSize)
+	var offset uint64
+	var sessionID string
+
+	for {
+		n, readErr := io.ReadFull(f, buf)
+		if readErr == io.EOF {
+			break // 已無更多資料
+		}
+		if readErr != nil && readErr != io.ErrUnexpectedEOF {
+			return fmt.Errorf("讀取分段失敗（offset=%d）: %w", offset, readErr)
+		}
+		chunk := buf[:n]
+		isLast := offset+uint64(n) >= uint64(size)
+
+		if sessionID == "" {
+			sid, startErr := c.sessionStart(ctx, token, chunk)
+			if startErr != nil {
+				return startErr
+			}
+			sessionID = sid
+		} else {
+			if appendErr := c.sessionAppend(ctx, token, sessionID, offset, chunk); appendErr != nil {
+				return appendErr
+			}
+		}
+		offset += uint64(n)
+		if isLast {
+			break
+		}
+	}
+
+	// 所有資料已上傳，finish 以空段在最終 offset 提交。
+	return c.sessionFinish(ctx, token, sessionID, offset, remotePath)
+}
+
+// sessionStart 開啟一個 upload session 並上傳第一段，回傳 session_id。
+func (c *Client) sessionStart(ctx context.Context, token string, data []byte) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.sessionStartURL, bytes.NewReader(data))
+	if err != nil {
+		return "", fmt.Errorf("建立 session start 請求失敗: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Dropbox-API-Arg", `{"close":false}`)
+	req.Header.Set("Content-Type", "application/octet-stream")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("session start 送出失敗: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, readErr := io.ReadAll(io.LimitReader(resp.Body, maxErrBody))
+	if readErr != nil {
+		return "", fmt.Errorf("讀取 session start 回應失敗: %w", readErr)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("session start 失敗，狀態碼 %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	var sr sessionStartResp
+	if err := json.Unmarshal(body, &sr); err != nil {
+		return "", fmt.Errorf("解析 session start 回應失敗: %w", err)
+	}
+	if sr.SessionID == "" {
+		return "", errors.New("session start 回應未包含 session_id")
+	}
+	return sr.SessionID, nil
+}
+
+// sessionAppend 將一段資料附加到既有 session 的指定 offset。
+func (c *Client) sessionAppend(ctx context.Context, token, sessionID string, offset uint64, data []byte) error {
+	arg, err := json.Marshal(appendArg{Cursor: uploadCursor{SessionID: sessionID, Offset: offset}, Close: false})
+	if err != nil {
+		return fmt.Errorf("組裝 session append 參數失敗: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.sessionAppendURL, bytes.NewReader(data))
+	if err != nil {
+		return fmt.Errorf("建立 session append 請求失敗: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Dropbox-API-Arg", asciiSafe(string(arg)))
+	req.Header.Set("Content-Type", "application/octet-stream")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("session append 送出失敗（offset=%d）: %w", offset, err)
+	}
+	defer resp.Body.Close()
+
+	body, readErr := io.ReadAll(io.LimitReader(resp.Body, maxErrBody))
+	if readErr != nil {
+		return fmt.Errorf("讀取 session append 回應失敗（offset=%d）: %w", offset, readErr)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("session append 失敗（offset=%d），狀態碼 %d: %s", offset, resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	return nil
+}
+
+// sessionFinish 以空段在最終 offset 提交 session，完成上傳。
+func (c *Client) sessionFinish(ctx context.Context, token, sessionID string, offset uint64, remotePath string) error {
+	arg, err := json.Marshal(finishArg{
+		Cursor: uploadCursor{SessionID: sessionID, Offset: offset},
+		Commit: commitInfo{Path: remotePath, Mode: "overwrite", Mute: true},
+	})
+	if err != nil {
+		return fmt.Errorf("組裝 session finish 參數失敗: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.sessionFinishURL, bytes.NewReader(nil))
+	if err != nil {
+		return fmt.Errorf("建立 session finish 請求失敗: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Dropbox-API-Arg", asciiSafe(string(arg)))
+	req.Header.Set("Content-Type", "application/octet-stream")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("session finish 送出失敗: %w", err)
+	}
+	defer resp.Body.Close()
+	return checkUploadResponse(resp)
 }
