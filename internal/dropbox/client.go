@@ -266,6 +266,13 @@ type finishArg struct {
 // sessionUpload 以分段 session 上傳大檔：
 // start（第一段）→ append（中段）→ finish（空段 + commit）。
 func (c *Client) sessionUpload(ctx context.Context, token, localPath, remotePath string, size int64) error {
+	if size <= 0 {
+		return fmt.Errorf("session upload 的檔案大小無效: %d", size)
+	}
+	if c.chunkSize <= 0 {
+		return fmt.Errorf("分段大小無效: %d", c.chunkSize)
+	}
+
 	f, err := os.Open(localPath)
 	if err != nil {
 		return fmt.Errorf("開啟檔案失敗: %w", err)
@@ -302,6 +309,11 @@ func (c *Client) sessionUpload(ctx context.Context, token, localPath, remotePath
 		if isLast {
 			break
 		}
+	}
+
+	// 若檔案在 Stat 後被清空/截斷導致完全沒讀到資料，session 不會建立。
+	if sessionID == "" {
+		return errors.New("沒有讀到任何資料，session 未建立（檔案可能已被清空）")
 	}
 
 	// 所有資料已上傳，finish 以空段在最終 offset 提交。

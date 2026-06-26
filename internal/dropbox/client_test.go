@@ -274,6 +274,27 @@ func TestUpload_SessionExactMultiple(t *testing.T) {
 	require.Equal(t, content, assembled)
 }
 
+func TestUpload_SessionInvalidChunkSize(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/oauth2/token", tokenHandler(t))
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	c := New("appkey", "appsecret", "reftok",
+		WithEndpoints(srv.URL+"/oauth2/token", srv.URL+"/upload",
+			srv.URL+"/start", srv.URL+"/append", srv.URL+"/finish"),
+		WithLimits(10, 0)) // chunkSize=0 → 應回明確錯誤而非卡死
+
+	content := []byte("0123456789ABC") // 13 bytes > 10 → 走 session
+	dir := t.TempDir()
+	fp := filepath.Join(dir, "big.log")
+	require.NoError(t, os.WriteFile(fp, content, 0o644))
+
+	err := c.Upload(context.Background(), fp, "/logs/big.log")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "分段大小無效")
+}
+
 func TestAsciiSafe(t *testing.T) {
 	for _, in := range []string{"abc", "紀錄", "a😀b", "/logs/app.log"} {
 		out := asciiSafe(in)
