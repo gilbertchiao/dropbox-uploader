@@ -2,7 +2,6 @@
 package config
 
 import (
-	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -62,9 +61,15 @@ func (c *Config) Validate() error {
 // RemotePath 依目標資料夾與來源檔名（取 basename）組出 Dropbox 上傳路徑。
 func (c *Config) RemotePath(filename string) (string, error) {
 	base := filepath.Base(filename)
-	if base == "." || base == string(filepath.Separator) || base == "" {
-		return "", errors.New("無法從檔名取得有效的 basename")
+	if base == "." || base == ".." || base == string(filepath.Separator) || base == "" {
+		return "", fmt.Errorf("無法從檔名取得有效的 basename: %q", filename)
 	}
-	dir := "/" + strings.Trim(c.TargetDir, "/")
+	// TargetDir 去除前後斜線後再補單一 leading slash；
+	// 當 TargetDir 為根目錄（"/" 或全斜線）時 trimmed 為空，dir 留空避免組出 "//base"。
+	trimmed := strings.Trim(c.TargetDir, "/")
+	dir := ""
+	if trimmed != "" {
+		dir = "/" + trimmed
+	}
 	return dir + "/" + base, nil
 }
