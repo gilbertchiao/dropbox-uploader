@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"time"
@@ -12,6 +13,10 @@ import (
 	"github.com/gilbertchiao/dropbox-uploader/internal/config"
 	"github.com/gilbertchiao/dropbox-uploader/internal/dropbox"
 )
+
+// version 由 build 時以 -ldflags "-X main.version=..." 注入（build.sh 取自 git describe）；
+// 未注入時預設為 dev。
+var version = "dev"
 
 const (
 	exitOK        = 0
@@ -32,8 +37,13 @@ func main() {
 func run(args []string) int {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
+	if len(args) == 2 && (args[1] == "--version" || args[1] == "-v") {
+		fmt.Println(version)
+		return exitOK
+	}
+
 	if len(args) != 2 {
-		logger.Error("用法錯誤", "usage", "dropbox-uploader <檔案路徑>")
+		logger.Error("用法錯誤", "usage", "dropbox-uploader <檔案路徑> | --version | -v")
 		return exitUsage
 	}
 	localPath := args[1]

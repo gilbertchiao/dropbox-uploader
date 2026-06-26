@@ -40,11 +40,17 @@ reject_single_quote DROPBOX_APP_SECRET "$DROPBOX_APP_SECRET"
 reject_single_quote DROPBOX_REFRESH_TOKEN "$DROPBOX_REFRESH_TOKEN"
 reject_single_quote DROPBOX_TARGET_DIR "$DROPBOX_TARGET_DIR"
 
+# 版本字串取自 git：有 tag 時為 tag（如 v1.0.0，工作區有未提交變更時加 -dirty）；
+# 無 tag 但在 git repo 中時退回短 commit hash（--always）；完全不在 git repo 時退回 dev。
+VERSION="$(git -C "$SCRIPT_DIR" describe --tags --always --dirty 2>/dev/null || echo dev)"
+reject_single_quote VERSION "$VERSION"
+
 LDFLAGS="-s -w"
 LDFLAGS+=" -X '${PKG}.AppKey=${DROPBOX_APP_KEY}'"
 LDFLAGS+=" -X '${PKG}.AppSecret=${DROPBOX_APP_SECRET}'"
 LDFLAGS+=" -X '${PKG}.RefreshToken=${DROPBOX_REFRESH_TOKEN}'"
 LDFLAGS+=" -X '${PKG}.TargetDir=${DROPBOX_TARGET_DIR}'"
+LDFLAGS+=" -X 'main.version=${VERSION}'"
 
 if $DRY_RUN; then
   echo "[dry-run] 將執行：CGO_ENABLED=0 go build -trimpath -ldflags \"<已隱藏機密>\" -o ${OUTPUT} ."
