@@ -43,7 +43,7 @@ func run(args []string) int {
 	}
 
 	if len(args) != 2 {
-		logger.Error("用法錯誤", "usage", "dropbox-uploader <檔案路徑> | --version")
+		logger.Error("用法錯誤", "usage", "dropbox-uploader <檔案路徑> | --version | -v")
 		return exitUsage
 	}
 	localPath := args[1]

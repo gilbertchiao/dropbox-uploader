@@ -23,20 +23,28 @@ func setConfig(t *testing.T, key, secret, refresh, dir string) func() {
 
 func TestRun_Version(t *testing.T) {
 	for _, flag := range []string{"--version", "-v"} {
-		// 擷取 stdout 驗證印出的內容為 version 變數值
-		orig := os.Stdout
-		r, w, err := os.Pipe()
-		require.NoError(t, err)
-		os.Stdout = w
+		flag := flag
+		t.Run(flag, func(t *testing.T) {
+			// 擷取 stdout 驗證印出的內容為 version 變數值。
+			orig := os.Stdout
+			r, w, err := os.Pipe()
+			require.NoError(t, err)
+			// 以 defer 確保即使斷言失敗（FailNow）也會還原 os.Stdout 並釋放 fd。
+			defer func() {
+				os.Stdout = orig
+				_ = r.Close()
+			}()
 
-		code := run([]string{"dropbox-uploader", flag})
+			os.Stdout = w
+			code := run([]string{"dropbox-uploader", flag})
+			require.NoError(t, w.Close())
 
-		require.NoError(t, w.Close())
-		os.Stdout = orig
-		out, _ := io.ReadAll(r)
+			out, err := io.ReadAll(r)
+			require.NoError(t, err)
 
-		require.Equal(t, exitOK, code, "flag %s 應回傳成功", flag)
-		require.Equal(t, version, strings.TrimSpace(string(out)), "flag %s 應印出版本", flag)
+			require.Equal(t, exitOK, code, "flag %s 應回傳成功", flag)
+			require.Equal(t, version, strings.TrimSpace(string(out)), "flag %s 應印出版本", flag)
+		})
 	}
 }
 
