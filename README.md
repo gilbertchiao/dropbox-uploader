@@ -1,6 +1,6 @@
 # dropbox-uploader
 
-把指定檔案（主要是 log）上傳備份到固定 Dropbox App folder 的單一靜態執行檔。零外部相依、部署時只需一個 binary、無設定檔。
+把指定檔案上傳備份到固定 Dropbox App folder 的單一靜態執行檔。零外部相依、部署時只需一個 binary、無設定檔。
 
 ## 用法
 
@@ -69,3 +69,7 @@ go vet ./...
 ```
 
 設計與實作文件見 `docs/superpowers/`。
+
+## License
+
+[MIT](LICENSE) © 2026 Gilbert Chiao

@@ -1,5 +1,9 @@
 # dropbox-uploader Implementation Plan
 
+> **狀態：已實作完成。** 四個階段（Task 1–4）皆已透過 PR #1–#4 實作並合併至 main，
+> 內含 GitHub Copilot review 的修正。本文件保留為實作當時的計畫紀錄，後續以原始碼與
+> spec 為準。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 一個單一靜態 Go binary，用法 `dropbox-uploader <檔案>`，把檔案（主要是 log）上傳備份到固定的 Dropbox App folder，機密於 build 時以 ldflags 注入。
