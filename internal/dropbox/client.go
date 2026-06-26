@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"unicode/utf16"
 )
 
 const (
@@ -55,8 +56,14 @@ type Client struct {
 // Option 為 Client 的選用設定。
 type Option func(*Client)
 
-// WithHTTPClient 覆寫底層 http.Client。
-func WithHTTPClient(h *http.Client) Option { return func(c *Client) { c.httpClient = h } }
+// WithHTTPClient 覆寫底層 http.Client。傳入 nil 時忽略，避免 Do 時 panic。
+func WithHTTPClient(h *http.Client) Option {
+	return func(c *Client) {
+		if h != nil {
+			c.httpClient = h
+		}
+	}
+}
 
 // WithLogger 設定結構化 logger。
 func WithLogger(l *slog.Logger) Option {
@@ -133,7 +140,10 @@ func (c *Client) accessToken(ctx context.Context) (string, error) {
 	}
 	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrBody))
+	body, readErr := io.ReadAll(io.LimitReader(resp.Body, maxErrBody))
+	if readErr != nil {
+		return "", &AuthError{fmt.Errorf("讀取 token 回應失敗: %w", readErr)}
+	}
 	if resp.StatusCode != http.StatusOK {
 		return "", &AuthError{fmt.Errorf("token 換取失敗，狀態碼 %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))}
 	}
@@ -154,15 +164,21 @@ type commitInfo struct {
 	Mute bool   `json:"mute"`
 }
 
-// asciiSafe 將字串中非 ASCII 字元轉為 \uXXXX，確保可放入 HTTP header。
+// asciiSafe 將字串中非 ASCII 字元轉為 JSON \uXXXX 轉義，確保可放入 HTTP header。
 // Dropbox-API-Arg header 僅接受 ASCII，含中文等字元的路徑需先轉義。
+// 非 BMP 字元（如 emoji，> U+FFFF）以 UTF-16 surrogate pair（兩個 \uXXXX）輸出，
+// 才能維持合法的 JSON 轉義。
 func asciiSafe(s string) string {
 	var b strings.Builder
 	for _, r := range s {
-		if r > 0x7F {
-			fmt.Fprintf(&b, "\\u%04x", r)
-		} else {
+		switch {
+		case r <= 0x7F:
 			b.WriteRune(r)
+		case r <= 0xFFFF:
+			fmt.Fprintf(&b, "\\u%04x", r)
+		default:
+			r1, r2 := utf16.EncodeRune(r)
+			fmt.Fprintf(&b, "\\u%04x\\u%04x", r1, r2)
 		}
 	}
 	return b.String()
@@ -215,8 +231,12 @@ func (c *Client) simpleUpload(ctx context.Context, token, localPath, remotePath 
 }
 
 // checkUploadResponse 檢查上傳類請求的回應狀態。
+// 讀取回應失敗時回傳錯誤，避免在無法確認結果時誤判為成功。
 func checkUploadResponse(resp *http.Response) error {
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrBody))
+	body, readErr := io.ReadAll(io.LimitReader(resp.Body, maxErrBody))
+	if readErr != nil {
+		return fmt.Errorf("讀取上傳回應失敗（狀態碼 %d）: %w", resp.StatusCode, readErr)
+	}
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("上傳失敗，狀態碼 %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
