@@ -1,8 +1,10 @@
 package main
 
 import (
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gilbertchiao/dropbox-uploader/internal/config"
@@ -16,6 +18,25 @@ func setConfig(t *testing.T, key, secret, refresh, dir string) func() {
 	config.AppKey, config.AppSecret, config.RefreshToken, config.TargetDir = key, secret, refresh, dir
 	return func() {
 		config.AppKey, config.AppSecret, config.RefreshToken, config.TargetDir = ok, os2, or, od
+	}
+}
+
+func TestRun_Version(t *testing.T) {
+	for _, flag := range []string{"--version", "-v"} {
+		// 擷取 stdout 驗證印出的內容為 version 變數值
+		orig := os.Stdout
+		r, w, err := os.Pipe()
+		require.NoError(t, err)
+		os.Stdout = w
+
+		code := run([]string{"dropbox-uploader", flag})
+
+		require.NoError(t, w.Close())
+		os.Stdout = orig
+		out, _ := io.ReadAll(r)
+
+		require.Equal(t, exitOK, code, "flag %s 應回傳成功", flag)
+		require.Equal(t, version, strings.TrimSpace(string(out)), "flag %s 應印出版本", flag)
 	}
 }
 

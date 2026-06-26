@@ -7,9 +7,13 @@
 ```bash
 dropbox-uploader <檔案路徑>
 # 例：dropbox-uploader /var/log/myapp/app.log
+
+dropbox-uploader --version   # 顯示版本（亦可用 -v）
 ```
 
 檔案會以原檔名上傳到 build 時設定的目標資料夾，同名直接覆寫。
+
+版本由 `build.sh` 於編譯時取自 git tag（如 `v1.0.0`）注入；未經 `build.sh`（例如直接 `go build`）編譯時顯示為 `dev`。
 
 ## 建置
 
