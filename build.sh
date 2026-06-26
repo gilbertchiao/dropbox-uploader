@@ -26,11 +26,25 @@ source "$SECRETS_FILE"
 : "${DROPBOX_REFRESH_TOKEN:?secrets.env 缺少 DROPBOX_REFRESH_TOKEN}"
 : "${DROPBOX_TARGET_DIR:?secrets.env 缺少 DROPBOX_TARGET_DIR}"
 
+# go -ldflags 以單引號包覆每個 -X 值，才能支援含空白的路徑；
+# 值本身不可含單引號（否則會破壞引用），先行拒絕。
+reject_single_quote() {
+  local name="$1" value="$2"
+  if [[ "$value" == *"'"* ]]; then
+    echo "錯誤：${name} 不可包含單引號 (')" >&2
+    exit 1
+  fi
+}
+reject_single_quote DROPBOX_APP_KEY "$DROPBOX_APP_KEY"
+reject_single_quote DROPBOX_APP_SECRET "$DROPBOX_APP_SECRET"
+reject_single_quote DROPBOX_REFRESH_TOKEN "$DROPBOX_REFRESH_TOKEN"
+reject_single_quote DROPBOX_TARGET_DIR "$DROPBOX_TARGET_DIR"
+
 LDFLAGS="-s -w"
-LDFLAGS+=" -X ${PKG}.AppKey=${DROPBOX_APP_KEY}"
-LDFLAGS+=" -X ${PKG}.AppSecret=${DROPBOX_APP_SECRET}"
-LDFLAGS+=" -X ${PKG}.RefreshToken=${DROPBOX_REFRESH_TOKEN}"
-LDFLAGS+=" -X ${PKG}.TargetDir=${DROPBOX_TARGET_DIR}"
+LDFLAGS+=" -X '${PKG}.AppKey=${DROPBOX_APP_KEY}'"
+LDFLAGS+=" -X '${PKG}.AppSecret=${DROPBOX_APP_SECRET}'"
+LDFLAGS+=" -X '${PKG}.RefreshToken=${DROPBOX_REFRESH_TOKEN}'"
+LDFLAGS+=" -X '${PKG}.TargetDir=${DROPBOX_TARGET_DIR}'"
 
 if $DRY_RUN; then
   echo "[dry-run] 將執行：CGO_ENABLED=0 go build -trimpath -ldflags \"<已隱藏機密>\" -o ${OUTPUT} ."
