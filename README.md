@@ -8,10 +8,13 @@
 dropbox-uploader <檔案路徑>
 # 例：dropbox-uploader /var/log/myapp/app.log
 
+dropbox-uploader --help      # 顯示用法說明（亦可用 -h）
 dropbox-uploader --version   # 顯示版本（亦可用 -v）
 ```
 
 檔案會以原檔名上傳到 build 時設定的目標資料夾，同名直接覆寫。
+
+不帶參數直接執行（或加 `-h`/`--help`）會印出用法說明：`--help`/`-h` 屬主動查詢，輸出到 stdout 並以 exit code 0 結束；不帶參數視為用法錯誤，說明改輸出到 stderr 並以 exit code 1 結束，方便 cron/script 偵測漏傳參數。
 
 版本由 `build.sh` 於編譯時以 `git describe` 注入：有 tag 時顯示 tag（如 `v1.0.0`，工作區有未提交變更時加 `-dirty`）；無 tag 但在 git repo 中時顯示短 commit hash；未經 `build.sh`（例如直接 `go build`）編譯時顯示為 `dev`。
 
