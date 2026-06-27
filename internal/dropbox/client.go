@@ -25,7 +25,7 @@ const (
 	defaultSessionFinishURL = "https://content.dropboxapi.com/2/files/upload_session/finish"
 
 	defaultSimpleLimit int64 = 150 * 1024 * 1024 // 150 MB
-	defaultChunkSize   int64 = 8 * 1024 * 1024    // 8 MB（4MB 倍數）
+	defaultChunkSize   int64 = 8 * 1024 * 1024   // 8 MB（4MB 倍數）
 
 	maxErrBody = 1 << 20 // 讀取回應內容的上限（1MB）
 )

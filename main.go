@@ -20,12 +20,13 @@ import (
 var version = "dev"
 
 const (
-	exitOK        = 0
-	exitUsage     = 1
-	exitFileError = 2
-	exitConfigErr = 3
-	exitAuthError = 4
-	exitUploadErr = 5
+	exitOK = 0 // 成功
+	// 1 依 Unix 慣例保留給「一般性錯誤」，本程式目前未使用。
+	exitUsage     = 2 // 用法錯誤（無參數 / 參數數量錯誤），對齊 Unix 與標準庫 flag 慣例
+	exitFileError = 3 // 來源檔案問題（不存在 / 是目錄）
+	exitConfigErr = 4 // 設定（注入機密）載入失敗
+	exitAuthError = 5 // Dropbox 認證失敗
+	exitUploadErr = 6 // 上傳失敗
 
 	uploadTimeout = 30 * time.Minute
 )
