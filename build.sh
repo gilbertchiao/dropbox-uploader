@@ -32,25 +32,27 @@ usage() {
 EOF
 }
 
-# 解析參數：支援 --help/-h（最優先）與 --go。
+# 解析參數：逐一檢查所有參數，任何未知參數都報錯退出。
+# --help/-h 出現在任何位置都優先顯示說明後結束。
 DRY_RUN=true
-case "${1:-}" in
-  -h | --help)
-    usage
-    exit 0
-    ;;
-  --go)
-    DRY_RUN=false
-    ;;
-  "")
-    ;;
-  *)
-    echo "錯誤：未知參數 '${1}'" >&2
-    echo >&2
-    usage >&2
-    exit 1
-    ;;
-esac
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h | --help)
+      usage
+      exit 0
+      ;;
+    --go)
+      DRY_RUN=false
+      ;;
+    *)
+      echo "錯誤：未知參數 '${1}'" >&2
+      echo >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
+  shift
+done
 
 if [[ ! -f "$SECRETS_FILE" ]]; then
   echo "錯誤：找不到 ${SECRETS_FILE}" >&2
