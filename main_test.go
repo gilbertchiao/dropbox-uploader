@@ -30,8 +30,10 @@ func TestRun_Version(t *testing.T) {
 			r, w, err := os.Pipe()
 			require.NoError(t, err)
 			// 以 defer 確保即使斷言失敗（FailNow）也會還原 os.Stdout 並釋放 fd。
+			// w 也一併關閉（顯式 w.Close() 之外的保險，double-close 無妨）。
 			defer func() {
 				os.Stdout = orig
+				_ = w.Close()
 				_ = r.Close()
 			}()
 
@@ -58,6 +60,7 @@ func TestRun_Help(t *testing.T) {
 			require.NoError(t, err)
 			defer func() {
 				os.Stdout = orig
+				_ = w.Close()
 				_ = r.Close()
 			}()
 
@@ -88,6 +91,7 @@ func TestRun_NoArgsShowsUsageNotErrorLog(t *testing.T) {
 	require.NoError(t, err)
 	defer func() {
 		os.Stderr = orig
+		_ = w.Close()
 		_ = r.Close()
 	}()
 
