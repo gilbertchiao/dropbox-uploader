@@ -31,7 +31,7 @@ dropbox-uploader --version   # 顯示版本（亦可用 -v）
    ./build.sh --go
    ```
 
-   `build.sh` 預設為 dry-run（只顯示將執行的指令），加上 `--go` 才真正編譯。產出的 `dropbox-uploader` 可直接部署到 server。
+   `build.sh` 預設為 dry-run（只顯示將執行的指令），加上 `--go` 才真正編譯。產出的 binary 位於 `bin/dropbox-uploader`，可直接部署到 server。執行 `./build.sh --help` 可查看完整用法。
 
 ## 取得 refresh token（一次性）
 

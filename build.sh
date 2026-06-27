@@ -4,13 +4,53 @@ set -euo pipefail
 # build.sh — 讀 secrets.env，用 ldflags 將機密注入並編譯 dropbox-uploader。
 # 預設為 dry-run（僅顯示動作）；加 --go 才真正編譯。
 
-DRY_RUN=true
-[[ "${1:-}" == "--go" ]] && DRY_RUN=false
-
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SECRETS_FILE="${SCRIPT_DIR}/secrets.env"
 PKG="github.com/gilbertchiao/dropbox-uploader/internal/config"
-OUTPUT="${SCRIPT_DIR}/dropbox-uploader"
+# 編譯產物統一輸出到 bin/ 子目錄，避免散落在專案根目錄。
+BUILD_DIR="${SCRIPT_DIR}/bin"
+OUTPUT="${BUILD_DIR}/dropbox-uploader"
+
+# 顯示腳本用法說明。
+usage() {
+  cat <<EOF
+用法：build.sh [選項]
+
+讀取 secrets.env 中的機密，透過 go -ldflags 注入並編譯 dropbox-uploader。
+採 --go 風格：預設為 dry-run（僅顯示將執行的動作），加 --go 才真正編譯。
+
+選項：
+  --go          真正執行編譯（不加此旗標時僅為 dry-run）
+  -h, --help    顯示本說明並結束
+
+輸出：
+  編譯產物會輸出至 ${BUILD_DIR}/dropbox-uploader
+
+範例：
+  ./build.sh          # dry-run，只顯示將執行的指令
+  ./build.sh --go     # 真正編譯，產出 bin/dropbox-uploader
+EOF
+}
+
+# 解析參數：支援 --help/-h（最優先）與 --go。
+DRY_RUN=true
+case "${1:-}" in
+  -h | --help)
+    usage
+    exit 0
+    ;;
+  --go)
+    DRY_RUN=false
+    ;;
+  "")
+    ;;
+  *)
+    echo "錯誤：未知參數 '${1}'" >&2
+    echo >&2
+    usage >&2
+    exit 1
+    ;;
+esac
 
 if [[ ! -f "$SECRETS_FILE" ]]; then
   echo "錯誤：找不到 ${SECRETS_FILE}" >&2
@@ -53,10 +93,14 @@ LDFLAGS+=" -X '${PKG}.TargetDir=${DROPBOX_TARGET_DIR}'"
 LDFLAGS+=" -X 'main.version=${VERSION}'"
 
 if $DRY_RUN; then
+  echo "[dry-run] 將建立輸出目錄：${BUILD_DIR}"
   echo "[dry-run] 將執行：CGO_ENABLED=0 go build -trimpath -ldflags \"<已隱藏機密>\" -o ${OUTPUT} ."
   echo "[dry-run] 加上 --go 參數才會真正編譯。"
   exit 0
 fi
+
+# 確保輸出目錄存在（bin/ 已列入 .gitignore，不會進版控）。
+mkdir -p "$BUILD_DIR"
 
 echo "編譯中…"
 CGO_ENABLED=0 go build -trimpath -ldflags "$LDFLAGS" -o "$OUTPUT" .
