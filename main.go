@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"time"
@@ -29,21 +30,53 @@ const (
 	uploadTimeout = 30 * time.Minute
 )
 
+// usageText 為執行檔的用法說明，於 -h/--help 或參數錯誤時顯示。
+const usageText = `dropbox-uploader — 把指定檔案上傳備份到固定的 Dropbox 資料夾
+
+用法：
+  dropbox-uploader <檔案路徑>    上傳指定檔案到 build 時設定的目標資料夾（同名直接覆寫）
+  dropbox-uploader --help        顯示本說明（亦可用 -h）
+  dropbox-uploader --version     顯示版本（亦可用 -v）
+
+範例：
+  dropbox-uploader /var/log/myapp/app.log
+
+說明：
+  app key/secret、refresh token 與目標資料夾於 build 時以 -ldflags 注入，
+  部署時只需這個單一執行檔、無需設定檔。
+`
+
 func main() {
 	os.Exit(run(os.Args))
+}
+
+// printUsage 將用法說明寫到指定 writer：
+//   - -h/--help 為使用者主動查詢，寫到 os.Stdout（正常輸出）
+//   - 參數錯誤屬於錯誤情境，寫到 os.Stderr（避免污染 stdout）
+func printUsage(w io.Writer) {
+	fmt.Fprint(w, usageText)
 }
 
 // run 為實際流程，回傳 process exit code，方便測試。
 func run(args []string) int {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
-	if len(args) == 2 && (args[1] == "--version" || args[1] == "-v") {
-		fmt.Println(version)
-		return exitOK
+	// 先處理單一旗標：--version/-v 與 --help/-h，皆視為成功結束。
+	if len(args) == 2 {
+		switch args[1] {
+		case "--version", "-v":
+			fmt.Println(version)
+			return exitOK
+		case "--help", "-h":
+			printUsage(os.Stdout)
+			return exitOK
+		}
 	}
 
+	// 無參數或參數數量不對：顯示用法說明（非錯誤 log），
+	// 但仍回傳 exitUsage，讓 cron/script 能由 exit code 偵測到漏傳參數。
 	if len(args) != 2 {
-		logger.Error("用法錯誤", "usage", "dropbox-uploader <檔案路徑> | --version | -v")
+		printUsage(os.Stderr)
 		return exitUsage
 	}
 	localPath := args[1]
